@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-13   # Intel x86_64, zgodny ze starym GDNative
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,28 +24,33 @@ jobs:
           unzip -q templates.tpz -d /tmp/godot_templates
           cp -R /tmp/godot_templates/templates/* ~/Library/Application\ Support/Godot/export_templates/3.5.3.stable/
 
-      - name: Disable incompatible GDNative addons
+      - name: Remove incompatible GDNative binaries
         run: |
-          # Wyłącz autoloady GDNative (Discord, native_dialogs) – nie działają na iOS ani na nowym macOS
+          # Usuń binarki .dylib które są w x86_64 i nie załadują się na ARM
+          find addons -name "*.dylib" -delete || true
+          find addons -name "*.so" -delete || true
+          find addons -name "*.dll" -delete || true
+          # Wyłącz autoloady odwołujące się do nich
           python3 - <<'PY'
           import re
           p = 'project.godot'
           s = open(p, encoding='utf-8').read()
-          # Usuń linie z autoloadami odwołującymi się do discord_game_sdk i native_dialogs
           s = re.sub(r'^[^\n]*discord_game_sdk[^\n]*\n', '', s, flags=re.M)
           s = re.sub(r'^[^\n]*native_dialogs[^\n]*\n', '', s, flags=re.M)
+          s = re.sub(r'^[^\n]*godot-openvr[^\n]*\n', '', s, flags=re.M)
           open(p, 'w', encoding='utf-8').write(s)
           PY
+          # Usuń też same foldery addonów, żeby edytor ich nie skanował
+          rm -rf addons/discord_game_sdk || true
+          rm -rf addons/native_dialogs || true
+          rm -rf addons/godot-openvr || true
 
       - name: Import project (first editor pass)
         run: |
-          # Pierwsze uruchomienie w trybie edytora wygeneruje .import/
-          # Może rzucić błędami GDNative – ignorujemy i idziemy dalej
           godot --headless --editor --quit --path . || true
-          # Drugi przebieg dla pewności
           godot --headless --editor --quit --path . || true
-          # Sprawdź, czy kluczowe pliki .import istnieją
-          ls -la .import/ | head -50 || true
+          echo "--- .import dir ---"
+          ls .import/ | head -30 || true
 
       - name: Patch export preset with dummy Team ID
         run: |
