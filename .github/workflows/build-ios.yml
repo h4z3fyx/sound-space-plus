@@ -1,70 +1,100 @@
-name: Build iOS IPA
+name: Build iOS IPA (Godot 3.5.3)
 
 on:
   workflow_dispatch:
 
+env:
+  GODOT_VERSION: 3.5.3-stable
+  IOS_PRESET: iOS
+  NAME: Rhythia
+
 jobs:
   build-ios:
     runs-on: macos-14
+    timeout-minutes: 40
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Godot 3.5.3
         run: |
-          curl -L -o godot.zip https://github.com/godotengine/godot/releases/download/3.5.3-stable/Godot_v3.5.3-stable_osx.universal.zip
+          curl -L -o godot.zip https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_osx.universal.zip
           unzip -q godot.zip
           sudo mv Godot.app /Applications/Godot.app
           sudo ln -sf /Applications/Godot.app/Contents/MacOS/Godot /usr/local/bin/godot
 
-      - name: Download export templates for 3.5.3
+      - name: Download export templates 3.5.3
         run: |
-          curl -L -o templates.tpz https://github.com/godotengine/godot/releases/download/3.5.3-stable/Godot_v3.5.3-stable_export_templates.tpz
+          curl -L -o templates.tpz https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz
           mkdir -p ~/Library/Application\ Support/Godot/export_templates/3.5.3.stable
           unzip -q templates.tpz -d /tmp/godot_templates
           cp -R /tmp/godot_templates/templates/* ~/Library/Application\ Support/Godot/export_templates/3.5.3.stable/
 
-      - name: Remove incompatible GDNative binaries
+      - name: Remove only incompatible native binaries (keep GDScript)
         run: |
-          # Usuń binarki .dylib które są w x86_64 i nie załadują się na ARM
-          find addons -name "*.dylib" -delete || true
-          find addons -name "*.so" -delete || true
-          find addons -name "*.dll" -delete || true
-          # Wyłącz autoloady odwołujące się do nich
-          python3 - <<'PY'
-          import re
-          p = 'project.godot'
-          s = open(p, encoding='utf-8').read()
-          s = re.sub(r'^[^\n]*discord_game_sdk[^\n]*\n', '', s, flags=re.M)
-          s = re.sub(r'^[^\n]*native_dialogs[^\n]*\n', '', s, flags=re.M)
-          s = re.sub(r'^[^\n]*godot-openvr[^\n]*\n', '', s, flags=re.M)
-          open(p, 'w', encoding='utf-8').write(s)
-          PY
-          # Usuń też same foldery addonów, żeby edytor ich nie skanował
-          rm -rf addons/discord_game_sdk || true
-          rm -rf addons/native_dialogs || true
-          rm -rf addons/godot-openvr || true
+          # Usuwamy TYLKO pliki binarne (x86_64), zostawiamy skrypty .gd,
+          # żeby autoload "Discord" nadal istniał i Rhythia.gd się parsował.
+          find addons -type f \( -name "*.dylib" -o -name "*.so" -o -name "*.dll" \) -print -delete || true
 
-      - name: Import project (first editor pass)
+      - name: Import project (editor in background with polling)
         run: |
-          godot --headless --editor --quit --path . || true
-          godot --headless --editor --quit --path . || true
-          echo "--- .import dir ---"
-          ls .import/ | head -30 || true
+          set +e
+          godot --headless --editor --path . &
+          PID=$!
+          for i in $(seq 1 60); do
+            sleep 5
+            COUNT=$(ls .import 2>/dev/null | wc -l | tr -d ' ')
+            echo "iter $i: .import count = $COUNT"
+            if [ "$COUNT" -gt 150 ]; then
+              echo "Import looks complete."
+              break
+            fi
+          done
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          echo "Final .import count: $(ls .import 2>/dev/null | wc -l | tr -d ' ')"
 
-      - name: Patch export preset with dummy Team ID
+      - name: Patch export preset (Team ID + export_project_only)
         run: |
           if [ -f export_presets.cfg ]; then
             sed -i '' 's/app_store_team_id=""/app_store_team_id="ABCDE12345"/' export_presets.cfg
+            # W Godot 3.5 nie ma export_project_only, ale eksport iOS i tak tworzy Xcode project.
           fi
 
-      - name: Export iOS project (unsigned)
+      - name: Export to Xcode project
         run: |
           mkdir -p build/ios
-          godot --headless --path . --export-release "iOS" build/ios/Rhythia.ipa
+          # W Godot 3.5 eksport iOS tworzy folder z .xcodeproj
+          godot --headless --path . --export-release "${IOS_PRESET}" build/ios/${NAME}.xcodeproj
+          echo "--- zawartość build/ios ---"
+          find build/ios -maxdepth 2 -type f | head -20
+
+      - name: xcodebuild archive (unsigned)
+        run: |
+          xcodebuild archive \
+            -project build/ios/${NAME}.xcodeproj \
+            -scheme "${NAME}" \
+            -archivePath build/ios/App.xcarchive \
+            -configuration Release \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package IPA
+        run: |
+          cd build/ios
+          mkdir -p Payload
+          cp -R App.xcarchive/Products/Applications/*.app Payload/
+          zip -r "${NAME}.ipa" Payload
+          mv "${NAME}.ipa" ../../
+          ls -la "${NAME}.ipa"
 
       - name: Upload IPA artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Rhythia-unsigned-ipa
-          path: build/ios/*.ipa
+          path: ${{ env.NAME }}.ipa
+          if-no-files-found: warn
