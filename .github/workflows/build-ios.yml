@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-14
+    runs-on: macos-13   # Intel x86_64, zgodny ze starym GDNative
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,15 +24,38 @@ jobs:
           unzip -q templates.tpz -d /tmp/godot_templates
           cp -R /tmp/godot_templates/templates/* ~/Library/Application\ Support/Godot/export_templates/3.5.3.stable/
 
+      - name: Disable incompatible GDNative addons
+        run: |
+          # Wyłącz autoloady GDNative (Discord, native_dialogs) – nie działają na iOS ani na nowym macOS
+          python3 - <<'PY'
+          import re
+          p = 'project.godot'
+          s = open(p, encoding='utf-8').read()
+          # Usuń linie z autoloadami odwołującymi się do discord_game_sdk i native_dialogs
+          s = re.sub(r'^[^\n]*discord_game_sdk[^\n]*\n', '', s, flags=re.M)
+          s = re.sub(r'^[^\n]*native_dialogs[^\n]*\n', '', s, flags=re.M)
+          open(p, 'w', encoding='utf-8').write(s)
+          PY
+
+      - name: Import project (first editor pass)
+        run: |
+          # Pierwsze uruchomienie w trybie edytora wygeneruje .import/
+          # Może rzucić błędami GDNative – ignorujemy i idziemy dalej
+          godot --headless --editor --quit --path . || true
+          # Drugi przebieg dla pewności
+          godot --headless --editor --quit --path . || true
+          # Sprawdź, czy kluczowe pliki .import istnieją
+          ls -la .import/ | head -50 || true
+
       - name: Patch export preset with dummy Team ID
         run: |
-          # Ensure preset has a Team ID so export doesn't fail
-          sed -i '' 's/app_store_team_id=""/app_store_team_id="ABCDE12345"/' export_presets.cfg || true
+          if [ -f export_presets.cfg ]; then
+            sed -i '' 's/app_store_team_id=""/app_store_team_id="ABCDE12345"/' export_presets.cfg
+          fi
 
       - name: Export iOS project (unsigned)
         run: |
           mkdir -p build/ios
-          godot --headless --path . --export-release "iOS" build/ios/Rhythia.ipa || \
           godot --headless --path . --export-release "iOS" build/ios/Rhythia.ipa
 
       - name: Upload IPA artifact
