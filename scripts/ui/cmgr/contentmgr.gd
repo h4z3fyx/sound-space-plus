@@ -1,7 +1,7 @@
 extends Node
 
 func set_rpc_status(state:String):
-	if not OS.has_feature("Android"):
+	if ProjectSettings.get_setting("application/config/discord_rpc"):
 		var activity = Discord.Activity.new()
 		activity.set_type(Discord.ActivityType.Playing)
 		activity.set_details("Content Manager")

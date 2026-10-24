@@ -28,7 +28,7 @@ func _ready():
 		$Avatar/Head/CubellaHair/Hair_dya.visible = true
 		$Avatar/Head/CubellaHair/Ears_dya.visible = true
 	
-	if OS.has_feature("Android"):
+	if OS.has_feature("mobile"):
 		$Skip.text = "Tap to skip"
 	$ColorRect.modulate.a = 1
 #	OS.window_fullscreen = true
@@ -54,7 +54,7 @@ func _ready():
 func _input(event):
 	if Input.is_action_just_pressed("pause") and can_skip:
 		get_tree().change_scene("res://scenes/init.tscn")
-	elif OS.has_feature("Android") and can_skip:
+	elif OS.has_feature("mobile") and can_skip and event is InputEventScreenTouch and event.pressed:
 		get_tree().change_scene("res://scenes/init.tscn")
 
 func _process(delta):

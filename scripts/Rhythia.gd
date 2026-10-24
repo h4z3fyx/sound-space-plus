@@ -2503,7 +2503,9 @@ func do_init(_ud=null):
 		emit_signal("init_stage_reached","Check VR status")
 		yield(get_tree(),"idle_frame")
 
-		var interface = ARVRServer.find_interface("OpenVR")
+		var interface = null
+		if not OS.has_feature("mobile"):
+			interface = ARVRServer.find_interface("OpenVR")
 		if interface:
 			vr_interface = interface
 			vr_available = true
