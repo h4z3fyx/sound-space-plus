@@ -59,6 +59,8 @@ While you're here, join our discord in [here](https://discord.gg/rhythia)
 
 ### For iOS users (iPhone and iPad)
 
+[Download the experimental unsigned IPA](https://github.com/h4z3fyx/sound-space-plus/releases/download/ios-preview-c34bd7a/Rhythia-unsigned.ipa).
+
 See the [iOS build and installation guide](docs/iOS.md) or the [Polish sideload tutorial](docs/iOS-sideload-pl.md). Builds require signing with your Apple account before installation.
 
 ## If you can't execute your game on Linux <a href="#dl-trouble" id="dl-linuxfix"/>

@@ -5,6 +5,13 @@ na prawdziwym urządzeniu wymaga jeszcze testów.
 
 ## 1. Pobierz IPA
 
+**Gotowy eksperymentalny build:** [pobierz Rhythia-unsigned.ipa](https://github.com/h4z3fyx/sound-space-plus/releases/download/ios-preview-c34bd7a/Rhythia-unsigned.ipa)
+([strona wydania](https://github.com/h4z3fyx/sound-space-plus/releases/tag/ios-preview-c34bd7a)).
+Ten plik przeszedł kompilację na macOS i kontrolę zawartości paczki. Nie był jeszcze
+sprawdzony na fizycznym urządzeniu. Jest niepodpisany — przejdź do punktu 2.
+
+Aby pobrać artefakt z innego buildu:
+
 1. Wejdź w [buildy iOS](https://github.com/h4z3fyx/sound-space-plus/actions/workflows/build-ios.yml).
 2. Otwórz zakończony zielonym znakiem build zawierający zadanie `build-ios`.
 3. Na dole strony, w **Artifacts**, pobierz **Rhythia-iOS-unsigned**.
