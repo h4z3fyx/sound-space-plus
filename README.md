@@ -16,6 +16,7 @@ While you're here, join our discord in [here](https://discord.gg/rhythia)
         - [Windows](#dl-win)
         - [Linux](#dl-penguin)
         - [Android](#dl-phone)
+        - [iOS](docs/iOS.md)
     - [Making SSP executable on Linux](#dl-linuxfix)
 - [Troubleshooting](#tr)
 - [User Folder location](#usr)
@@ -55,6 +56,10 @@ While you're here, join our discord in [here](https://discord.gg/rhythia)
 
 - Download gles2 on older devices, or gles3 on newer devices
 - Install the apk on your phone
+
+### For iOS users (iPhone and iPad)
+
+See the [iOS build and installation guide](docs/iOS.md) or the [Polish sideload tutorial](docs/iOS-sideload-pl.md). Builds require signing with your Apple account before installation.
 
 ## If you can't execute your game on Linux <a href="#dl-trouble" id="dl-linuxfix"/>
 

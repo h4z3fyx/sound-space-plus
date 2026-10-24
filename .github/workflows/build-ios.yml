@@ -3,158 +3,98 @@ name: Build iOS IPA (Godot 3.5.3)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   GODOT_VERSION: 3.5.3-stable
-  IOS_PRESET: iOS
-  NAME: Rhythia
 
 jobs:
-  build-ios:
-    runs-on: macos-14
-    timeout-minutes: 50
+  export-ios:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Godot 3.5.3
+      - name: Install Godot and iOS export template
+        shell: bash
         run: |
-          curl -L -o godot.zip https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_osx.universal.zip
-          unzip -q godot.zip
-          sudo mv Godot.app /Applications/Godot.app
-          sudo ln -sf /Applications/Godot.app/Contents/MacOS/Godot /usr/local/bin/godot
-          godot --version
-
-      - name: Download export templates
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+          curl --fail --location --retry 3 "$base/Godot_v${GODOT_VERSION}_linux_headless.64.zip" -o "$RUNNER_TEMP/godot.zip"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
+          curl --fail --location --retry 3 "$base/Godot_v${GODOT_VERSION}_export_templates.tpz" -o "$RUNNER_TEMP/templates.tpz"
+          mkdir -p "$HOME/.local/share/godot/templates/3.5.3.stable"
+          unzip -p "$RUNNER_TEMP/templates.tpz" templates/iphone.zip > "$HOME/.local/share/godot/templates/3.5.3.stable/iphone.zip"
+      - name: Test iOS project preparation
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+      - name: Prepare isolated iOS project
+        run: python3 tools/prepare_ios.py "$RUNNER_TEMP/ssp-ios"
+      - name: Import project
+        shell: bash
         run: |
-          curl -L -o templates.tpz https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz
-          mkdir -p ~/Library/Application\ Support/Godot/export_templates/3.5.3.stable
-          unzip -q templates.tpz -d /tmp/godot_templates
-          cp -R /tmp/godot_templates/templates/* ~/Library/Application\ Support/Godot/export_templates/3.5.3.stable/
-
-      - name: Diagnostics
+          set -euo pipefail
+          Godot_v${GODOT_VERSION}_linux_headless.64 --path "$RUNNER_TEMP/ssp-ios" --export-pack iOS "$RUNNER_TEMP/import.pck" 2>&1 | tee "$RUNNER_TEMP/import.log"
+          if grep -E 'SCRIPT ERROR|Parse Error|Error importing' "$RUNNER_TEMP/import.log"; then exit 1; fi
+      - name: Export Xcode project
+        shell: bash
         run: |
-          echo "--- assets/images/branding ---"
-          ls -la assets/images/branding/ 2>/dev/null || echo "MISSING DIR"
-          echo "--- autoloads in project.godot ---"
-          grep -A 40 '\[autoload\]' project.godot 2>/dev/null || echo "no autoload"
-          echo "--- export_presets.cfg ---"
-          cat export_presets.cfg 2>/dev/null || echo "MISSING PRESETS"
-
-      - name: Neutralize GDNative addons (binaries + native script refs)
-        run: |
-          # Delete native binaries AND .gdns/.gdnlib (they tell Godot to load a native lib)
-          find addons -type f \( \
-            -name "*.dylib" -o -name "*.so" -o -name "*.dll" \
-            -o -name "*.gdns" -o -name "*.gdnlib" \
-            \) -print -delete || true
-
-          # Stub Discord autoload - Rhythia.gd references `Discord.xyz()` so it must exist
-          mkdir -p addons/discord_game_sdk
-          cat > addons/discord_game_sdk/discord.gd << 'EOF'
-extends Node
-# STUB for iOS build - native SDK removed
-func _ready(): pass
-func _init(): pass
-EOF
-
-          # Stub native_dialogs autoload
-          mkdir -p addons/native_dialogs
-          cat > addons/native_dialogs/native_dialogs.gd << 'EOF'
-extends Node
-# STUB for iOS build - native SDK removed
-func _ready(): pass
-func _init(): pass
-EOF
-
-          echo "--- after neutralize ---"
-          find addons -type f | head -40
-
-      - name: Import project (wait until .import stabilizes)
-        run: |
-          set +e
-          godot --headless --editor --path . &
-          PID=$!
-          LAST=0
-          STABLE=0
-          for i in $(seq 1 120); do
-            sleep 5
-            COUNT=$(ls .import 2>/dev/null | wc -l | tr -d ' ')
-            echo "iter $i: .import count = $COUNT"
-            if [ "$COUNT" = "$LAST" ] && [ "$COUNT" -gt 100 ]; then
-              STABLE=$((STABLE+1))
-              if [ "$STABLE" -ge 4 ]; then
-                echo "Import stable at $COUNT files."
-                break
-              fi
-            else
-              STABLE=0
-            fi
-            LAST=$COUNT
-          done
-          kill -INT $PID 2>/dev/null || true
-          sleep 3
-          kill $PID 2>/dev/null || true
-          wait $PID 2>/dev/null || true
-          echo "Final .import count: $(ls .import 2>/dev/null | wc -l | tr -d ' ')"
-          # Sprawdź czy .import zawiera icon.png
-          ls .import/ | grep -i "icon" | head -5 || true
-
-      - name: Patch export preset
-        run: |
-          if [ -f export_presets.cfg ]; then
-            sed -i '' 's/app_store_team_id=""/app_store_team_id="ABCDE12345"/' export_presets.cfg
-          fi
-
-      - name: Export to Xcode project
-        run: |
+          set -euo pipefail
           mkdir -p build/ios
-          set +e
-          godot --headless --path . --export-release "${IOS_PRESET}" build/ios/${NAME}.xcodeproj
-          echo "Godot exit code: $?"
-          echo "--- build/ios contents ---"
-          find build/ios -maxdepth 3 | head -60
-
-      - name: xcodebuild archive (unsigned)
-        if: success()
-        run: |
-          set +e
-          PROJ="build/ios/${NAME}.xcodeproj"
-          if [ ! -d "$PROJ" ]; then
-            echo "No xcodeproj at $PROJ - skipping"
-            exit 0
-          fi
-          xcodebuild archive \
-            -project "$PROJ" \
-            -scheme "${NAME}" \
-            -archivePath build/ios/App.xcarchive \
-            -configuration Release \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
-
-      - name: Package IPA
-        if: success()
-        run: |
-          set +e
-          if [ ! -d build/ios/App.xcarchive ]; then
-            echo "No xcarchive - skipping IPA packaging"
-            exit 0
-          fi
-          cd build/ios
-          mkdir -p Payload
-          cp -R App.xcarchive/Products/Applications/*.app Payload/
-          zip -r "${NAME}.ipa" Payload
-          mv "${NAME}.ipa" ../../
-          ls -la "${NAME}.ipa"
-
-      - name: Upload everything
-        if: always()
+          # Godot 3 uses --export. Linux generates Xcode files without invoking signing.
+          Godot_v${GODOT_VERSION}_linux_headless.64 --path "$RUNNER_TEMP/ssp-ios" --export iOS "$GITHUB_WORKSPACE/build/ios/Rhythia.ipa" 2>&1 | tee "$RUNNER_TEMP/export.log"
+          if grep -E 'SCRIPT ERROR|Parse Error|^ERROR:' "$RUNNER_TEMP/export.log"; then exit 1; fi
+          test -s build/ios/Rhythia.xcodeproj/project.pbxproj
+          test -s build/ios/Rhythia.pck
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rhythia-Xcode
+          path: build/ios/
+          if-no-files-found: error
+      - name: Upload diagnostics
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Rhythia-build
+          name: iOS-export-logs
           path: |
-            build/
-            .import/
-            Rhythia.ipa
-          if-no-files-found: warn
+            ${{ runner.temp }}/import.log
+            ${{ runner.temp }}/export.log
+
+  build-ios:
+    needs: export-ios
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Rhythia-Xcode
+          path: build/ios
+      - name: Archive unsigned application
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project build/ios/Rhythia.xcodeproj \
+            -scheme Rhythia \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/ios/Rhythia.xcarchive" \
+            -configuration Release \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+          test -d build/ios/Rhythia.xcarchive/Products/Applications/Rhythia.app
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios/Payload
+          cp -R build/ios/Rhythia.xcarchive/Products/Applications/Rhythia.app build/ios/Payload/
+          cd build/ios
+          zip -qr Rhythia-unsigned.ipa Payload
+          test -s Rhythia-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rhythia-iOS-unsigned
+          path: build/ios/Rhythia-unsigned.ipa
+          if-no-files-found: error
