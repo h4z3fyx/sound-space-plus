@@ -1,6 +1,9 @@
 name: Build iOS IPA (Godot 3.5.3)
 
 on:
+  push:
+    branches:
+      - coderabbit/support-ssp-on-ios/5bce3dd4
   workflow_dispatch:
 
 permissions:
